@@ -1,5 +1,5 @@
-// offline cache for 労働基準法 条文立法史ノート  (version 68224f0d50)
-const CACHE = 'lsa-68224f0d50';
+// offline cache for 労働基準法 条文立法史ノート  (version 8b2a1a8a19)
+const CACHE = 'lsa-8b2a1a8a19';
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', ev => { ev.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', ev => {

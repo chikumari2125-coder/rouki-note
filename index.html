@@ -779,7 +779,7 @@ function article(k){
         <button class="step" data-slide="${next ? next.key : ''}" data-dir="1" ${next ? '' : 'disabled'} title="${next ? esc(next.label) + 'へ' : '最後の条文です'}"><span>次へ<small>${next ? esc(next.label) : '—'}</small></span><span class="ar">›</span></button>
       </div>
     </div>
-    <div class="badges"><span class="badge">${SCOPE_NAME[e.scope]}</span>${e.status ? tagHtml(e.status).replace('class="tag', 'class="tag badge-tag') : ''}<span class="badge">シート「${esc(e.sheet)}」${e.rows.length > 1 ? ` ${e.rows.length}行を結合` : ''}</span></div>
+    <div class="badges"><span class="badge">${SCOPE_NAME[e.scope]}</span>${e.status ? tagHtml(e.status).replace('class="tag', 'class="tag badge-tag') : ''}</div>
     <details class="sheet"><summary>このシートの注記</summary>${sheetNotes.map(n => `<p>${esc(n)}</p>`).join('')}${extra}</details>
     <div class="rec">
       <button class="btn" data-st="done" aria-pressed="${r.st === 'done'}">学習済み</button>
