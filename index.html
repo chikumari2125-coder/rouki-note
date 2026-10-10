@@ -403,23 +403,45 @@ const RX_EXC = /(ただし、|ただし書|但し、|この限りでない|を�
 let MARKS = {n:false, s:false, x:false};
 let CUR = null, SCOPE = 'honsoku';
 
-function findRefs(t, scope){
+// where the text being rendered comes from (used to decide whether 「第○条」 means this Act)
+let REFCTX = {key:null, field:null, off:false, hist:false, alias:[]};
+// individual places where the wording alone does not show that another Act is meant (checked against the Excel text)
+const NOLINK = [
+  {key:'h93', field:'tsu', at:'第12条の最低基準効'}   // 労働契約法第12条（直前の「労契法第７条・第10条」に続く記述）
+];
+const OTHER_LAW = /(法律|法|令|規則|則|規程|条約|号)(（[^）]*）|\([^)]*\))?の?$/;
+const IS_LSA = /(労働基準法|労基法)(（[^）]*）|\([^)]*\))?の?$/;
+// a run of article numbers joined by ・、及び など: 「労働安全衛生法第59条・第60条」の「第60条」も安衛法の条
+const CHAIN = /(?:第\d+条(?:の\d+)*(?:第\d+項)?(?:第\d+号)?(?:ただし書)?(?:以下|以降)?\s*(?:[・、，,]|及び|又は|若しくは|並びに|から|乃至|〜|～|~)\s*)+$/;
+function findRefs(t0, scope){
   const self = PEEKSELF || CUR, out = [];
-  const rx = /(附則)?第(\d+)条((?:の\d+)*)/g; let m;
+  if (REFCTX.off) return out;
+  const t = t0.replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0) - 0xFEE0));   // same length, so positions stay
+  // 「第37条の50％」の「の50」は枝番ではない
+  const rx = /(附則)?第(\d+)条((?:の\d+(?![\d％%割倍円]))*)/g; let m;
+  const lsa = x => IS_LSA.test(x) || (REFCTX.field !== 'law' && /本法$/.test(x))
+    || (REFCTX.alias || []).some(a => x.endsWith(a) || new RegExp(a + '(（[^）]*）)?の?$').test(x));
   while ((m = rx.exec(t))){
-    const before = t.slice(Math.max(0, m.index-40), m.index);
-    const isLSA = /労働基準法(（[^）]*）|\([^)]*\))?$/.test(before);
-    if (scope === 'kaisei' && (!isLSA || /(改正前の|旧)労働基準法(（[^）]*）)?$/.test(before))) continue;
-    if (!isLSA && /(法|法律|令|規則|規程|条約)(（[^）]*）|\([^)]*\))?$/.test(before)) continue;
-    if (/旧$|同$/.test(before)) continue;
+    const before = t.slice(Math.max(0, m.index-60), m.index);
+    const head = before.replace(CHAIN, '');
+    const isLSA = lsa(before) || (head !== before && lsa(head));
+    if (scope === 'kaisei' && (!isLSA || /(改正前の|旧)労働基準法(（[^）]*）)?$/.test(head))) continue;
+    if (!isLSA && (OTHER_LAW.test(before) || (head !== before && OTHER_LAW.test(head)))) continue;
+    if (/(旧|同|改正前の|旧条番号は|旧番号は)$/.test(before)) continue;
+    if (/(旧|改正前の)(労働基準法|労基法)(（[^）]*）)?の?$/.test(head)) continue;
+    if (REFCTX.rule && /^(第\d+項)?(以下)?[：:は]/.test(t.slice(m.index + m[0].length).replace(/^(の\d+)+/, ''))) continue;
+    if (NOLINK.some(o => o.key === REFCTX.key && o.field === REFCTX.field && t0.startsWith(o.at, m.index))) continue;
     const n = +m[2], subs = (m[3].match(/\d+/g)||[]).map(Number);
     const fu = !!m[1] || (scope === 'fusoku' && n >= 122 && !isLSA);
     const pref = fu ? 'f' : 'h';
     const cand = subs.length ? [pref + [n, ...subs].join('-')] : [pref + n, pref + n + '-old'];
+    // 本則は第121条まで。第122条以降の労働基準法の条は附則の条
+    // ただし改正法附則の条文中の「新法第133条」などは、当時の附則の条（その後に条番号や内容が入れ替わっている場合がある）なのでリンクにしない
+    if (!m[1] && n >= 122 && !cand.some(k => E[k]) && !(scope === 'kaisei' && REFCTX.field === 'law')) cand.push('f' + [n, ...subs].join('-'));
     const target = cand.find(k => E[k]);
     if (!target || target === self) continue;
     const km = t.slice(m.index + m[0].length).match(/^第(\d+)項/);
-    out.push({s:m.index, e:m.index+m[0].length, kind:'ref', target, kou: km ? +km[1] : 0});
+    out.push({s:m.index, e:m.index+m[0].length, kind:'ref', target, kou: km ? +km[1] : 0, hist: REFCTX.hist});
   }
   return out;
 }
@@ -437,7 +459,7 @@ function inline(t, scope, withMarks){
     if (sp.s < pos) continue;
     h += esc(t.slice(pos, sp.s));
     const inner = esc(t.slice(sp.s, sp.e));
-    if (sp.kind === 'ref') h += `<a class="ref" href="#${sp.target}" data-ref="${sp.target}" data-kou="${sp.kou}" data-from="${scope}" title="${scope === 'kaisei' ? '現行の本則' + esc(E[sp.target].label) + 'へ移動（この附則が定められた当時の条文とは異なる場合があります）' : esc(E[sp.target].label) + 'へ移動'}">${inner}</a>`;
+    if (sp.kind === 'ref') h += `<a class="ref" href="#${sp.target}" data-ref="${sp.target}" data-kou="${sp.kou}" data-from="${scope}"${sp.hist ? ' data-hist="1"' : ''} title="${scope === 'kaisei' ? '現行の本則' + esc(E[sp.target].label) + 'へ移動（この附則が定められた当時の条文とは異なる場合があります）' : esc(E[sp.target].label) + 'へ移動'}">${inner}</a>`;
     else h += `<span class="${sp.kind}">${inner}</span>`;
     pos = sp.e;
   }
@@ -453,8 +475,14 @@ function tagClass(x){
 const tagHtml = x => `<span class="tag ${tagClass(x)}">【${esc(x)}】</span>`;
 function lawHtml(e){
   let h = '';
+  const keep = REFCTX;
+  REFCTX = {key:e.key, field:'law', off:false, hist: e.scope === 'fusoku' && !!e.status && tagClass(e.status) === 'gone',
+    // 改正法附則の中で「改正後の労働基準法（以下「新法」という。）」と定義された略称
+    alias: e.scope === 'kaisei' ? [...e.text.matchAll(/労働基準法（以下(?:この条において|この項において)?「([^」]+)」という。）/g)].map(x => x[1]).filter(a => !/旧/.test(a)) : []};
   e.text.split('\n').forEach(ln => {
     const t = ln.replace(/\s+$/,'');
+    // 「○○法の一部を次のように改正する。」の後は、その法律の条番号（労働基準法の条ではない）
+    const am = t.match(/([^\s　、。]+?法)の一部を次のように改正する/);
     if (!t.trim()){ h += '<div class="gap"></div>'; return; }
     if (/^【[^】]+】/.test(t)){ const m = t.match(/^【([^】]+)】(.*)$/); h += `<p>${tagHtml(m[1])}${m[2] ? ' ' + inline(m[2], e.scope, true) : ''}</p>`; return; }
     let cls = '';
@@ -463,12 +491,17 @@ function lawHtml(e){
     else if (/^\d+[　 ]/.test(t) || /^[一二三四五六七八九十]+[　]/.test(t)) cls = 'gou';
     else if (/^[イロハニホヘトチリヌ][　 ]/.test(t)) cls = 'sub';
     h += `<p${cls ? ` class="${cls}"` : ''}>${inline(t, e.scope, true)}</p>`;
+    if (am && !/労働基準法$/.test(am[1])) REFCTX.off = true;
   });
+  REFCTX = keep;
   return h;
 }
-function readHtml(text, scope){
+function readHtml(text, scope, key, field){
   if (!text) return '<p class="none">（空欄）</p>';
-  return text.split('\n').map((ln, i) => {
+  const keep = REFCTX; REFCTX = {key, field, off:false, hist:false};
+  const html = text.split('\n').map((ln, i) => {
+    // 【労働基準法施行規則（通達ではない）】のように見出しが規則を指す行では、「第○条：」「第○条は」と項目を立てている条は規則の条
+    const tg = ln.match(/^【([^】]+)】/); REFCTX.rule = !!(tg && /規則/.test(tg[1]) && !/第\d+条/.test(tg[1]));
     const t = ln.replace(/\s+$/,'');
     if (!t.trim()) return '<div class="gap"></div>';
     if (/^【[^】]+】/.test(t)){
@@ -483,6 +516,8 @@ function readHtml(text, scope){
     if (i === 0 && t.length < 90 && !/。$/.test(t)) return `<p class="hd">${inline(t, scope, false)}</p>`;
     return `<p>${inline(t, scope, false)}</p>`;
   }).join('');
+  REFCTX = keep;
+  return html;
 }
 function srcItem(s){
   return `<div class="src-it"><div class="k">${esc(s.t)}　｜　${esc(s.kind)}</div><div>${esc(s.what)}</div>${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>` : ''}</div>`;
@@ -622,13 +657,14 @@ function renderPeek(){
       <button class="peek-x" id="peek-x" aria-label="閉じる" title="閉じる（Esc）">×</button></div>
     <div class="peek-tools">${prev ? `<button class="btn" id="peek-back">‹ ${esc(E[prev.key].label)}に戻る</button>` : ''}
       <button class="btn open" id="peek-open">この条文を開く</button><button class="btn" id="peek-close">閉じて元の条文へ</button></div>
-    <div class="peek-b">${top.from === 'kaisei' ? '<p class="peek-note">現行の本則の条文です。改正法附則が定められた当時の条文とは異なる場合があります。</p>' : ''}${e.status === '削除' ? '<p class="peek-note">削除された条文です。</p>' : ''}
+    <div class="peek-b">${top.from === 'kaisei' ? '<p class="peek-note">現行の本則の条文です。改正法附則が定められた当時の条文とは異なる場合があります。</p>' : ''}${top.hist ? '<p class="peek-note">制定時・旧規定の附則からの参照です。表示は現行の条文で、当時の条文とは内容が異なる場合があります。</p>' : ''}${e.status === '削除' ? '<p class="peek-note">削除された条文です。</p>' : ''}
       <div class="law">${(PEEKSELF = top.key, lawHtml(e))}</div></div>`;
   PEEKSELF = null;
   box.hidden = false; $('#peekscrim').hidden = false;
   const law = box.querySelector('.law'), hit = top.kou ? kouIndex(law, top.kou) : null;
   box.querySelector('.peek-b').scrollTop = 0;
   if (hit){ hit.classList.add('hit-kou'); requestAnimationFrame(() => hit.scrollIntoView({block:'center'})); }
+  else if (top.kou > 1){ const nt = document.createElement('p'); nt.className = 'peek-note'; nt.textContent = `第${top.kou}項は、現在の条文の中に見当たりません（当時の項番号である可能性があります）。`; law.before(nt); }
   $('#peek-x').onclick = $('#peek-close').onclick = closePeek;
   if (prev) $('#peek-back').onclick = () => { PEEK.pop(); renderPeek(); };
   $('#peek-open').onclick = () => {
@@ -637,7 +673,7 @@ function renderPeek(){
   };
   $('#peek-x').focus({preventScroll:true});
 }
-function openPeek(key, kou, from){ PEEK.push({key, kou, from}); renderPeek(); }
+function openPeek(key, kou, from, hist){ PEEK.push({key, kou, from, hist}); renderPeek(); }
 function closePeek(){ PEEK = []; renderPeek(); }
 function syncBack(){
   const b = $('#backchip');
@@ -766,9 +802,9 @@ function article(k){
     </section>
     <div class="read">
       <nav class="toc"><a class="t-bg" href="#s-bg">1 背景</a><a class="t-deb" href="#s-deb">2 議論</a><a class="t-tsu" href="#s-tsu">3 通達</a><a class="t-src" href="#s-src">出典</a><a class="t-memo" href="#memo-${k}">メモ</a></nav>
-      <section class="card bg" id="s-bg"><h2><span class="no">1</span>${esc(cols[1])}</h2><div class="rd">${readHtml(e.bg, e.scope)}</div></section>
-      <section class="card deb" id="s-deb"><h2><span class="no">2</span>${esc(cols[2])}</h2>${notice}<div class="rd">${isDash(e.deb) ? `<p class="none">${dashNote}議論がなかったという意味ではありません）</p>` : readHtml(e.deb, e.scope)}</div></section>
-      <section class="card tsu" id="s-tsu"><h2><span class="no">3</span>${esc(cols[3])}</h2><div class="rd">${isDash(e.tsu) ? `<p class="none">${dashNote}）</p>` : readHtml(e.tsu, e.scope)}</div></section>
+      <section class="card bg" id="s-bg"><h2><span class="no">1</span>${esc(cols[1])}</h2><div class="rd">${readHtml(e.bg, e.scope, e.key, 'bg')}</div></section>
+      <section class="card deb" id="s-deb"><h2><span class="no">2</span>${esc(cols[2])}</h2>${notice}<div class="rd">${isDash(e.deb) ? `<p class="none">${dashNote}議論がなかったという意味ではありません）</p>` : readHtml(e.deb, e.scope, e.key, 'deb')}</div></section>
+      <section class="card tsu" id="s-tsu"><h2><span class="no">3</span>${esc(cols[3])}</h2><div class="rd">${isDash(e.tsu) ? `<p class="none">${dashNote}）</p>` : readHtml(e.tsu, e.scope, e.key, 'tsu')}</div></section>
       <details class="src" id="s-src"><summary>出典資料<small>${srcIdx.length}件　タップで開く</small></summary>
         <div class="src-list">${srcIdx.length ? srcIdx.map(i => srcItem(D.sources[i])).join('') : '<p class="none">この条文を個別に指す行はありません。範囲全体の資料は「出典資料」の一覧をご覧ください。</p>'}</div></details>
       <section class="card memo" id="memo-${k}"><h2>メモ<small>このブラウザに保存されます</small></h2>
@@ -884,7 +920,11 @@ function about(){
     <p>${esc(kaiseiNote)}</p>
     <h3>ツールでの表示調整（2026年10月10日）</h3>
     <p>1．第38条の4第5項：Excelでは文の途中で行が分かれているため、改行を入れずにつないでいます。そのほかの続きの行は、項・号の区切りとして改行してつないでいます。</p>
-    <p>2．条文中の「第○条」は、労働基準法の条文に限ってリンクにしています。他の法律の条番号と、改正法附則の中の条番号（改正法自体の条）はリンクにしていません。改正法附則の中では、「改正後の労働基準法第○条」「新労働基準法第○条」など改正後の労働基準法を指す箇所だけを現行の本則へのリンクにしています（改正当時の条文と内容が異なる場合があります）。「改正前の」「旧労働基準法」の箇所はリンクにしていません。</p>
+    <p>2．条文中の「第○条」は、労働基準法の条文を指す箇所に限ってリンクにしています（2026年10月10日に全478件のリンク先を点検）。次の箇所はリンクにしていません。</p>
+    <p>・他の法令の条番号：「労働安全衛生法第59条・第60条」のように法令名に続けて並べた条、「昭和40年法律第130号第19条」のように法律番号に続く条、「労基則第36条」、見出しが施行規則を指す行で「第○条：」「第○条は」と項目を立てた条、「鉱業法の一部を次のように改正する。」に続く条など。文面だけでは判別できない1か所（第93条の通達欄「第12条の最低基準効」＝労働契約法第12条）も個別に除いています。</p>
+    <p>・時点の異なる条番号：「旧第○条」「改正前の第○条」「旧労基法第○条」「旧条番号は第○条」など。</p>
+    <p>・改正法附則の中の条番号：改正法自体の条はリンクにしていません。「改正後の労働基準法第○条」「新労働基準法第○条」「新労基法第○条」、その附則で改正後の労働基準法の略称と定められた「新法第○条」は、現行の本則へのリンクにしています（改正当時の条文と内容が異なる場合があります）。改正法附則の中の「新法第133条」のような労働基準法の附則の条は、その後に附則の条番号や内容が入れ替わっている場合があるため、リンクにしていません。</p>
+    <p>・本則は第121条までのため、解説欄などの「労基法第143条」のような第122条以降の条は、本法附則の条へリンクしています。</p>
     <p>リンクを押すと、参照先の条文を画面の上に重ねて表示します（「第○条第○項」の場合は、その項に色を付けます）。「この条文を開く」で移動した場合は、左下の「○○条に戻る」で元の条文の同じ位置へ戻れます。「前条」「前項」「同条」などの表現はリンクにしていません。</p>
     <p>3．「数字・期間」「主体」「要件・例外」の印は、語句の機械的な検出によるものです。既定では表示していません。</p>
     <h3>学習記録</h3>
@@ -950,7 +990,7 @@ document.addEventListener('click', ev => {
     if (open) { delete UI.open[i]; saveUI(); if (CUR && String(E[CUR].ch) === i) { CUR = null; } renderList(); return; }
     UI.open[i] = true; saveUI(); return go('ch' + i); }
   const rf = ev.target.closest('a.ref[data-ref]');
-  if (rf){ ev.preventDefault(); openPeek(rf.dataset.ref, +rf.dataset.kou || 0, rf.dataset.from); return; }
+  if (rf){ ev.preventDefault(); openPeek(rf.dataset.ref, +rf.dataset.kou || 0, rf.dataset.from, rf.dataset.hist === '1'); return; }
   const bc = ev.target.closest('#backchip');
   if (bc){ if (ev.target.closest('[data-x]')) { RET = null; syncBack(); return; }
     const r = RET; RET = null; slide(r.key, -1); setTimeout(() => { if (CUR === r.key) $('#main').scrollTop = r.y; }, 420); syncBack(); return; }
