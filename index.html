@@ -169,21 +169,21 @@ button,input,textarea,select{font:inherit;color:inherit}
 .mk .s{text-decoration:underline;text-decoration-color:var(--mk-sub);text-decoration-thickness:2px;text-underline-offset:4px}
 .mk .x{text-decoration:underline dotted;text-decoration-color:var(--mk-exc);text-decoration-thickness:2px;text-underline-offset:4px}
 .legend{font-size:.74em;color:var(--sub);margin-top:10px}
-.hlbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 10px;font-size:.92em}
-.hlbar .btn[data-hl="pen"][aria-pressed="true"]{background:var(--hl0);color:#222;border-color:#b59a00}
+.hlbtn[aria-pressed="true"]{background:var(--hl0);color:#222;border-color:#b59a00}
+.hlbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 20px 8px;border-top:1px solid var(--rule);font-size:.92em}
+.hlbar[hidden]{display:none}
 .hlbar .btn[data-hl="erase"][aria-pressed="true"]{background:var(--ink);color:var(--paper)}
-.hlcols{display:none;gap:6px}
-.hlbar.pen .hlcols{display:inline-flex}
+.hlcols{display:inline-flex;gap:6px}
 .hlc{width:28px;height:28px;border-radius:50%;border:2px solid var(--rule);cursor:pointer;padding:0}
 .hlc[aria-pressed="true"]{border-color:var(--ink);box-shadow:0 0 0 2px var(--paper) inset}
 .hlc.c0{background:var(--hl0)} .hlc.c1{background:var(--hl1)} .hlc.c2{background:var(--hl2)}
 .hlbar .hint{font-size:.76em;color:var(--sub);flex-basis:100%}
 .hlbar .hint:empty{display:none}
 .hlbar [data-hlclear][hidden]{display:none}
-.law.hlon{touch-action:pan-y;-webkit-user-select:none;user-select:none;cursor:crosshair;-webkit-touch-callout:none}
-.law.hlon a.ref{pointer-events:none}
-mark.hl{color:inherit;background:linear-gradient(transparent 38%, var(--hlc) 38%, var(--hlc) 92%, transparent 92%);border-radius:1px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+[data-hlz].hlon{touch-action:pan-y;-webkit-user-select:none;user-select:none;cursor:crosshair;-webkit-touch-callout:none}
+.hlon a.ref{pointer-events:none}
 .pill.hlp{background:var(--hl0);color:#222;border-color:transparent}
+mark.hl{color:inherit;background:linear-gradient(transparent 38%, var(--hlc) 38%, var(--hlc) 92%, transparent 92%);border-radius:1px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 mark.hl.c0{--hlc:var(--hl0)} mark.hl.c1{--hlc:var(--hl1)} mark.hl.c2{--hlc:var(--hl2)}
 @media print{.hlbar{display:none}}
 /* reference preview: read the referred article without leaving the page */
@@ -297,6 +297,7 @@ mark{background:var(--mk-num);color:inherit}
   .menu-btn{display:inline-block}
   .page{padding:14px 16px 70px}
   .top-in{padding:8px 16px}
+  .hlbar{padding:6px 16px 8px}
   .lawbox{padding:12px 14px 14px}
   .card{padding:0 14px 14px} .card>h2{margin:0 -14px 10px;padding:8px 14px}
 }
@@ -328,9 +329,12 @@ mark{background:var(--mk-num);color:inherit}
     <div class="top"><div class="top-in">
       <button class="btn menu-btn" id="menu">一覧</button>
       <span class="crumb" id="crumb"></span>
+      <button class="btn hlbtn" id="hlbtn" data-hl="pen" aria-pressed="false" hidden title="条文・背景・議論・通達にマーカーを引く">マーカー</button>
       <button class="btn" id="thm" title="画面の明るさ（ライト／ダーク／端末に合わせる）">表示 ライト</button>
       <button class="btn" id="fsz" aria-pressed="false">文字 大</button>
-    </div></div>
+    </div>
+    <div class="hlbar" id="hlbar" hidden><span class="hlcols"><button class="hlc c0" data-hlc="0" aria-pressed="false" aria-label="黄" title="黄"></button><button class="hlc c1" data-hlc="1" aria-pressed="false" aria-label="緑" title="緑"></button><button class="hlc c2" data-hlc="2" aria-pressed="false" aria-label="青" title="青"></button></span><button class="btn" data-hl="erase" aria-pressed="false">線を消す</button><button class="btn" data-hlclear hidden>全部消す</button><button class="btn" data-hloff>終了</button><span class="hint"></span></div>
+    </div>
     <div class="page" id="page"></div>
   </main>
 </div>
@@ -523,16 +527,21 @@ function srcItem(s){
   return `<div class="src-it"><div class="k">${esc(s.t)}　｜　${esc(s.kind)}</div><div>${esc(s.what)}</div>${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.url)}</a>` : ''}</div>`;
 }
 
-/* ---------- marker (trace the article text) ---------- */
-// stored per article as [[start, end, colour, text], ...] on the plain text of the article box
+/* ---------- marker (trace the article text and the commentary) ---------- */
+// stored per article and per box: HL[key] = {law:[[start, end, colour, text], ...], bg:[...], deb:[...], tsu:[...]}
+const HLZ = {law:'条文', bg:'背景', deb:'議論', tsu:'通達'};
 let HL = {}; try { HL = JSON.parse(localStorage.getItem('lsa-hl') || '{}') || {}; } catch(e) { HL = {}; }
+function normHL(v){ if (Array.isArray(v)) return v.length ? {law: v} : null;          // earlier version: article text only
+  if (!v || typeof v !== 'object') return null; const o = {}; Object.keys(HLZ).forEach(z => { if (Array.isArray(v[z]) && v[z].length) o[z] = v[z]; }); return Object.keys(o).length ? o : null; }
+Object.keys(HL).forEach(k => { const v = normHL(HL[k]); if (v) HL[k] = v; else delete HL[k]; });
 function saveHL(){ try { localStorage.setItem('lsa-hl', JSON.stringify(HL)); } catch(e) {} }
+const hlCount = k => HL[k] ? Object.values(HL[k]).reduce((a, x) => a + x.length, 0) : 0;
 let HLMODE = '', HLCOL = 0, HLCLR = 0;
 try { HLCOL = +(localStorage.getItem('lsa-hlcol') || 0) % 3; } catch(e) {}
-function segsFor(k, full){
+function segsFor(k, z, full){
   // keep a line only where its text still matches (the workbook may be revised later)
   const out = [];
-  (HL[k] || []).forEach(([s, e, c, t]) => {
+  ((HL[k] || {})[z] || []).forEach(([s, e, c, t]) => {
     if (full.slice(s, e) === t) { out.push([s, e, c, t]); return; }
     let best = -1, i = full.indexOf(t);
     while (i >= 0){ if (best < 0 || Math.abs(i - s) < Math.abs(best - s)) best = i; i = full.indexOf(t, i + 1); }
@@ -551,10 +560,10 @@ function tidy(segs, full){
   segs.forEach(([s, e, c]) => { if (e <= s) return; const l = out[out.length - 1]; if (l && l[2] === c && l[1] >= s) l[1] = Math.max(l[1], e); else out.push([s, e, c]); });
   return out.map(([s, e, c]) => [s, e, c, full.slice(s, e)]);
 }
-function paintHL(live){
-  const el = $('#law'); if (!el || !CUR) return;
+const zonesOnPage = () => [...document.querySelectorAll('#page [data-hlz]')];
+function paintZone(el, segs){
   el.querySelectorAll('mark.hl').forEach(m => m.replaceWith(...m.childNodes)); el.normalize();
-  const full = el.textContent, segs = live || segsFor(CUR, full);
+  const full = el.textContent; if (!segs) segs = segsFor(CUR, el.dataset.hlz, full);
   if (!segs.length) return;
   const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = []; let n;
   while ((n = tw.nextNode())) nodes.push(n);
@@ -572,63 +581,67 @@ function paintHL(live){
     nd.replaceWith(fr);
   });
 }
+function paintHL(){ if (CUR) zonesOnPage().forEach(el => paintZone(el)); }
 function syncHL(){
-  const bar = $('#hlbar'), law = $('#law'); if (!bar) return;
-  bar.classList.toggle('pen', HLMODE === 'pen');
+  const on = !!HLMODE && !!CUR, bar = $('#hlbar'), btn = $('#hlbtn');
+  btn.hidden = !CUR; btn.setAttribute('aria-pressed', on);
+  bar.hidden = !on;
   bar.querySelectorAll('[data-hl]').forEach(b => b.setAttribute('aria-pressed', HLMODE === b.dataset.hl));
-  bar.querySelectorAll('[data-hlc]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.hlc === HLCOL));
-  const x = bar.querySelector('[data-hlclear]'); x.hidden = !(HL[CUR] && HL[CUR].length); if (!HLCLR) x.textContent = 'この条の線を全部消す';
-  bar.querySelector('.hint').textContent = HLMODE === 'pen' ? '条文を横になぞると線が引けます。縦に動かすとスクロールします。もう一度「マーカー」を押すと終了します。'
-    : HLMODE === 'erase' ? 'なぞった範囲、またはタップした線を消します。もう一度「線を消す」を押すと終了します。' : '';
-  law.classList.toggle('hlon', !!HLMODE);
+  bar.querySelectorAll('[data-hlc]').forEach(b => b.setAttribute('aria-pressed', HLMODE === 'pen' && +b.dataset.hlc === HLCOL));
+  const x = bar.querySelector('[data-hlclear]'); x.hidden = !hlCount(CUR); if (!HLCLR) x.textContent = '全部消す';
+  bar.querySelector('.hint').textContent = HLMODE === 'pen' ? '条文・背景・議論・通達を横になぞると線が引けます（縦はスクロール）。'
+    : HLMODE === 'erase' ? 'なぞった範囲、またはタップした線を消します。' : '';
+  zonesOnPage().forEach(el => el.classList.toggle('hlon', on));
 }
-function caretAt(x, y){
-  const el = $('#law'); let node, off;
+function caretAt(x, y, el){
+  let node, off;
   if (document.caretPositionFromPoint){ const c = document.caretPositionFromPoint(x, y); if (!c) return null; node = c.offsetNode; off = c.offset; }
   else if (document.caretRangeFromPoint){ const c = document.caretRangeFromPoint(x, y); if (!c) return null; node = c.startContainer; off = c.startOffset; }
   else return null;
   if (!el || !node || !el.contains(node)) return null;
+  if ((node.nodeType === 3 ? node.parentNode : node).closest('.none')) return null;   // 「—（確認済みの資料に…）」の注記には引かない
   const r = document.createRange(); r.setStart(el, 0); r.setEnd(node, off);
   return r.toString().length;
 }
 let DRAG = null;
-function liveSegs(){
-  const full = $('#law').textContent, base = segsFor(CUR, full).map(x => x.slice(0, 3));
-  const a = Math.min(DRAG.a, DRAG.b), b = Math.max(DRAG.a, DRAG.b);
+function liveSegs(d){
+  const full = d.el.textContent, base = segsFor(CUR, d.z, full).map(x => x.slice(0, 3));
+  const a = Math.min(d.a, d.b), b = Math.max(d.a, d.b);
   if (a === b) return tidy(base, full);
   const cut = cutSegs(base, a, b);
   if (HLMODE === 'pen') cut.push([a, b, HLCOL]);
   return tidy(cut, full);
 }
 document.addEventListener('pointerdown', ev => {
-  const el = ev.target.closest && ev.target.closest('#law');
+  const el = ev.target.closest && ev.target.closest('#page [data-hlz]');
   if (!el || !HLMODE || !CUR || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
-  const o = caretAt(ev.clientX, ev.clientY); if (o === null) return;
-  DRAG = {a:o, b:o, x:ev.clientX, y:ev.clientY, moved:false, id:ev.pointerId};
+  const o = caretAt(ev.clientX, ev.clientY, el); if (o === null) return;
+  DRAG = {el, z: el.dataset.hlz, a:o, b:o, x:ev.clientX, y:ev.clientY, moved:false, id:ev.pointerId};
   if (ev.pointerType === 'mouse') ev.preventDefault();
 });
 document.addEventListener('pointermove', ev => {
   if (!DRAG || ev.pointerId !== DRAG.id) return;
   if (!DRAG.moved && Math.hypot(ev.clientX - DRAG.x, ev.clientY - DRAG.y) < 6) return;
   DRAG.moved = true;
-  const o = caretAt(ev.clientX, ev.clientY); if (o !== null) DRAG.b = o;
-  paintHL(liveSegs());
+  const o = caretAt(ev.clientX, ev.clientY, DRAG.el); if (o !== null) DRAG.b = o;   // a line stays inside the box where it started
+  paintZone(DRAG.el, liveSegs(DRAG));
 });
 function endDrag(ev, cancel){
   if (!DRAG || ev.pointerId !== DRAG.id) return;
   const d = DRAG; DRAG = null;
-  if (cancel){ paintHL(); return; }
-  const full = $('#law').textContent;
+  if (cancel){ paintZone(d.el); return; }
+  const full = d.el.textContent;
   let segs;
-  if (d.moved && d.a !== d.b){ DRAG = d; segs = liveSegs(); DRAG = null; }
+  if (d.moved && d.a !== d.b) segs = liveSegs(d);
   else if (!d.moved && HLMODE === 'erase'){
-    const base = segsFor(CUR, full).map(x => x.slice(0, 3));
+    const base = segsFor(CUR, d.z, full).map(x => x.slice(0, 3));
     const at = q => base.findIndex(([s, e]) => s <= q && q < e);
-    let i = at(d.a); if (i < 0) i = at(d.a - 1); if (i < 0) { paintHL(); return; }
+    let i = at(d.a); if (i < 0) i = at(d.a - 1); if (i < 0) { paintZone(d.el); return; }
     base.splice(i, 1); segs = tidy(base, full);
-  } else { paintHL(); return; }
-  if (segs.length) HL[CUR] = segs; else delete HL[CUR];
-  saveHL(); paintHL(); syncHL(); renderList();
+  } else { paintZone(d.el); return; }
+  const rec = Object.assign({}, HL[CUR] || {}); if (segs.length) rec[d.z] = segs; else delete rec[d.z];
+  if (Object.keys(rec).length) HL[CUR] = rec; else delete HL[CUR];
+  saveHL(); paintZone(d.el); syncHL(); renderList();
 }
 document.addEventListener('pointerup', ev => endDrag(ev, false));
 document.addEventListener('pointercancel', ev => endDrag(ev, true));
@@ -689,7 +702,7 @@ function marksFor(k, withExam){
   if (r.st === 'done') s += '<span class="pill done">済</span>';
   else if (r.st === 'review') s += '<span class="pill rev">復習</span>';
   if (r.memo) s += '<span class="pill memo">メモ</span>';
-  if (HL[k] && HL[k].length) s += '<span class="pill hlp">線</span>';
+  if (hlCount(k)) s += '<span class="pill hlp">線</span>';
   return `<span class="marksq">${s}</span>`;
 }
 // 現行条文：本則は「削除」以外、本法附則は【現行掲載条文】のもの、改正法附則はe-Gov掲載のため全件
@@ -795,16 +808,15 @@ function article(k){
     <section class="lawbox" ${c ? hv(c.h) : ''} aria-label="${esc(cols[0])}">
       ${examHtml(e)}
       <div class="sec-h"><span>${esc(cols[0])}</span><span>${e.scope === 'kaisei' ? '改正法の附則（労基法の条文ではありません）' : ''}</span></div>
-      <div class="hlbar" id="hlbar"><button class="btn" data-hl="pen" aria-pressed="false">マーカー</button><span class="hlcols">${['黄','緑','青'].map((n, i) => `<button class="hlc c${i}" data-hlc="${i}" aria-pressed="false" aria-label="${n}" title="${n}"></button>`).join('')}</span><button class="btn" data-hl="erase" aria-pressed="false">線を消す</button><button class="btn" data-hlclear hidden>この条の線を全部消す</button><span class="hint"></span></div>
-      <div class="law${marked ? ' mk' : ''}" id="law">${lawHtml(e)}</div>
+      <div class="law${marked ? ' mk' : ''}" id="law" data-hlz="law">${lawHtml(e)}</div>
       ${marked ? `<div class="legend">${MARKS.n?'<span class="mk"><span class="n">数字・期間</span></span>':''}${MARKS.s?'<span class="mk"><span class="s">主体</span></span>':''}${MARKS.x?'<span class="mk"><span class="x">要件・例外</span></span>':''}　印は語句の機械的な検出です。読み落とし防止の補助としてご利用ください。</div>` : ''}
       ${e.scope === 'kaisei' && NOTE_KAISEI ? `<p class="legend">${esc(NOTE_KAISEI.what)}（出典資料シートの記載）</p>` : ''}
     </section>
     <div class="read">
       <nav class="toc"><a class="t-bg" href="#s-bg">1 背景</a><a class="t-deb" href="#s-deb">2 議論</a><a class="t-tsu" href="#s-tsu">3 通達</a><a class="t-src" href="#s-src">出典</a><a class="t-memo" href="#memo-${k}">メモ</a></nav>
-      <section class="card bg" id="s-bg"><h2><span class="no">1</span>${esc(cols[1])}</h2><div class="rd">${readHtml(e.bg, e.scope, e.key, 'bg')}</div></section>
-      <section class="card deb" id="s-deb"><h2><span class="no">2</span>${esc(cols[2])}</h2>${notice}<div class="rd">${isDash(e.deb) ? `<p class="none">${dashNote}議論がなかったという意味ではありません）</p>` : readHtml(e.deb, e.scope, e.key, 'deb')}</div></section>
-      <section class="card tsu" id="s-tsu"><h2><span class="no">3</span>${esc(cols[3])}</h2><div class="rd">${isDash(e.tsu) ? `<p class="none">${dashNote}）</p>` : readHtml(e.tsu, e.scope, e.key, 'tsu')}</div></section>
+      <section class="card bg" id="s-bg"><h2><span class="no">1</span>${esc(cols[1])}</h2><div class="rd" data-hlz="bg">${readHtml(e.bg, e.scope, e.key, 'bg')}</div></section>
+      <section class="card deb" id="s-deb"><h2><span class="no">2</span>${esc(cols[2])}</h2>${notice}<div class="rd" data-hlz="deb">${isDash(e.deb) ? `<p class="none">${dashNote}議論がなかったという意味ではありません）</p>` : readHtml(e.deb, e.scope, e.key, 'deb')}</div></section>
+      <section class="card tsu" id="s-tsu"><h2><span class="no">3</span>${esc(cols[3])}</h2><div class="rd" data-hlz="tsu">${isDash(e.tsu) ? `<p class="none">${dashNote}）</p>` : readHtml(e.tsu, e.scope, e.key, 'tsu')}</div></section>
       <details class="src" id="s-src"><summary>出典資料<small>${srcIdx.length}件　タップで開く</small></summary>
         <div class="src-list">${srcIdx.length ? srcIdx.map(i => srcItem(D.sources[i])).join('') : '<p class="none">この条文を個別に指す行はありません。範囲全体の資料は「出典資料」の一覧をご覧ください。</p>'}</div></details>
       <section class="card memo" id="memo-${k}"><h2>メモ<small>このブラウザに保存されます</small></h2>
@@ -855,7 +867,8 @@ function records(){
   CUR = null; renderList(); crumb('学習記録');
   const keys = Object.keys(REC).filter(k => E[k]).sort((a,b) => E[a].i - E[b].i);
   const row = k => { const e = E[k], r = REC[k] || {}, c = e.ch !== undefined ? CH[e.ch] : null; return `<button class="hit" data-go="${k}"><b>${esc(e.label)}</b><small>${c ? esc(c.no) + '　' : ''}${SCOPE_NAME[e.scope]}　${r.st === 'done' ? '学習済み' : r.st === 'review' ? '要復習' : ''}</small>${r.memo ? `<span>${esc(r.memo.slice(0,140))}</span>` : ''}</button>`; };
-  const hlk = Object.keys(HL).filter(k => E[k] && HL[k].length).sort((a,b) => E[a].i - E[b].i);
+  const hlk = Object.keys(HL).filter(k => E[k] && hlCount(k)).sort((a,b) => E[a].i - E[b].i);
+  const hlList = k => Object.keys(HLZ).flatMap(z => ((HL[k] || {})[z] || []).map(x => [z, x]));
   const rev = keys.filter(k => REC[k].st === 'review'), memo = keys.filter(k => REC[k].memo && REC[k].st !== 'review'), done = keys.filter(k => REC[k].st === 'done' && !REC[k].memo);
   $('#page').innerHTML = `<div class="doc"><h1>学習記録</h1>
     <p>記録（マーカーの線を含みます）はこのブラウザに保存されています。別の端末やブラウザへ移す場合は、書き出したファイルを読み込んでください。</p>
@@ -863,7 +876,7 @@ function records(){
     <h3 style="color:var(--c-rev)">要復習（${rev.length}件）</h3><div class="hits">${rev.map(row).join('') || '<p class="none">ありません。</p>'}</div>
     <h3>メモあり（${memo.length}件）</h3><div class="hits">${memo.map(row).join('') || '<p class="none">ありません。</p>'}</div>
     <h3 style="color:var(--c-done)">学習済み（${done.length}件）</h3><div class="hits">${done.map(row).join('') || '<p class="none">ありません。</p>'}</div>
-    <h3>マーカーを引いた条文（${hlk.length}件）</h3><div class="hits">${hlk.map(k => { const e = E[k], c = e.ch !== undefined ? CH[e.ch] : null; return `<button class="hit" data-go="${k}"><b>${esc(e.label)}</b><small>${c ? esc(c.no) + '　' : ''}${SCOPE_NAME[e.scope]}　${HL[k].length}箇所</small><span>${HL[k].slice(0, 4).map(x => `<mark class="hl c${x[2]}">${esc(x[3])}</mark>`).join('　')}</span></button>`; }).join('') || '<p class="none">ありません。</p>'}</div></div>`;
+    <h3>マーカーを引いた条文（${hlk.length}件）</h3><div class="hits">${hlk.map(k => { const e = E[k], c = e.ch !== undefined ? CH[e.ch] : null; return `<button class="hit" data-go="${k}"><b>${esc(e.label)}</b><small>${c ? esc(c.no) + '　' : ''}${SCOPE_NAME[e.scope]}　${hlCount(k)}箇所</small><span>${hlList(k).slice(0, 5).map(([z, x]) => `<small>${HLZ[z]}</small> <mark class="hl c${x[2]}">${esc(x[3])}</mark>`).join('　')}</span></button>`; }).join('') || '<p class="none">ありません。</p>'}</div></div>`;
   $('#exp').addEventListener('click', () => {
     const blob = new Blob([JSON.stringify({tool:'lsa-record-v1', saved:new Date().toISOString(), record:REC, marker:HL}, null, 1)], {type:'application/json'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'lsa-study-record-' + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.json'; document.body.appendChild(a); a.click(); a.remove();
@@ -873,7 +886,7 @@ function records(){
     const rd = new FileReader();
     rd.onload = () => { try { const j = JSON.parse(rd.result); const r = j.record || j; let n = 0;
       Object.keys(r).forEach(k => { if (E[k]) { REC[k] = Object.assign({}, REC[k], r[k]); n++; } }); saveRec();
-      let m = 0; if (j.marker) Object.keys(j.marker).forEach(k => { if (E[k] && Array.isArray(j.marker[k]) && j.marker[k].length) { HL[k] = j.marker[k]; m++; } }); saveHL();
+      let m = 0; if (j.marker) Object.keys(j.marker).forEach(k => { const v = normHL(j.marker[k]); if (E[k] && v) { HL[k] = v; m++; } }); saveHL();
       records(); $('#impmsg').textContent = n + '件の記録' + (m ? '、' + m + '件の条文のマーカー' : '') + 'を読み込みました'; }
       catch(e) { $('#impmsg').textContent = '読み込めませんでした。書き出したJSONファイルを選んでください。'; } };
     rd.readAsText(f);
@@ -968,7 +981,7 @@ function route(){
   home();
 }
 function go(t){ if (location.hash === '#' + t) route(); else location.hash = t; }
-window.addEventListener('hashchange', () => { closePeek(); route(); syncBack(); });
+window.addEventListener('hashchange', () => { closePeek(); route(); syncBack(); syncHL(); });
 const narrow = () => window.matchMedia('(max-width:900px)').matches;
 function closeSide(){ $('#side').classList.remove('open'); }
 function setCollapsed(b){ $('.app').classList.toggle('collapsed', b); UI.collapsed = b; saveUI(); }
@@ -994,11 +1007,13 @@ document.addEventListener('click', ev => {
   const bc = ev.target.closest('#backchip');
   if (bc){ if (ev.target.closest('[data-x]')) { RET = null; syncBack(); return; }
     const r = RET; RET = null; slide(r.key, -1); setTimeout(() => { if (CUR === r.key) $('#main').scrollTop = r.y; }, 420); syncBack(); return; }
-  const hb = ev.target.closest('[data-hl]'); if (hb){ HLMODE = HLMODE === hb.dataset.hl ? '' : hb.dataset.hl; HLCLR = 0; syncHL(); return; }
-  const hc = ev.target.closest('[data-hlc]'); if (hc){ HLCOL = +hc.dataset.hlc; try{ localStorage.setItem('lsa-hlcol', HLCOL); }catch(e){} syncHL(); return; }
+  const hb = ev.target.closest('[data-hl]');
+  if (hb){ const v = hb.dataset.hl; HLMODE = (hb.id === 'hlbtn') ? (HLMODE ? '' : 'pen') : (HLMODE === v ? 'pen' : v); HLCLR = 0; syncHL(); return; }
+  if (ev.target.closest('[data-hloff]')){ HLMODE = ''; HLCLR = 0; syncHL(); return; }
+  const hc = ev.target.closest('[data-hlc]'); if (hc){ HLCOL = +hc.dataset.hlc; HLMODE = 'pen'; try{ localStorage.setItem('lsa-hlcol', HLCOL); }catch(e){} syncHL(); return; }
   const hx = ev.target.closest('[data-hlclear]');
-  if (hx && CUR){ if (!HLCLR){ HLCLR = 1; hx.textContent = 'もう一度押すと全部消えます'; clearTimeout(hx._t); hx._t = setTimeout(() => { HLCLR = 0; syncHL(); }, 3000); return; }
-    HLCLR = 0; delete HL[CUR]; saveHL(); paintHL(); syncHL(); renderList(); return; }
+  if (hx && CUR){ if (!HLCLR){ HLCLR = 1; hx.textContent = 'もう一度押すとこの条の線が全部消えます'; clearTimeout(hx._t); hx._t = setTimeout(() => { HLCLR = 0; syncHL(); }, 3000); return; }
+    HLCLR = 0; delete HL[CUR]; saveHL(); article(CUR); return; }
   const sl = ev.target.closest('[data-slide]'); if (sl){ if (sl.dataset.slide) slide(sl.dataset.slide, +sl.dataset.dir); return; }
   const g = ev.target.closest('[data-go]'); if (g){ go(g.dataset.go); return; }
   const sc = ev.target.closest('[data-scope]');
@@ -1047,7 +1062,7 @@ function slide(key, dir){
 }
 // swipe on touch screens (tables that scroll sideways are left alone)
 let tx = null, ty = null;
-$('#page').addEventListener('touchstart', ev => { if (ev.target.closest('.tw,textarea,input,.hlbar') || (HLMODE && ev.target.closest('#law'))) { tx = null; return; } tx = ev.touches[0].clientX; ty = ev.touches[0].clientY; }, {passive:true});
+$('#page').addEventListener('touchstart', ev => { if (ev.target.closest('.tw,textarea,input') || (HLMODE && ev.target.closest('[data-hlz]'))) { tx = null; return; } tx = ev.touches[0].clientX; ty = ev.touches[0].clientY; }, {passive:true});
 $('#page').addEventListener('touchend', ev => {
   if (tx === null || !CUR) return;
   const dx = ev.changedTouches[0].clientX - tx, dy = ev.changedTouches[0].clientY - ty; tx = null;
@@ -1056,7 +1071,7 @@ $('#page').addEventListener('touchend', ev => {
   if (dx < 0 && nb.next) slide(nb.next.key, 1);
   if (dx > 0 && nb.prev) slide(nb.prev.key, -1);
 }, {passive:true});
-route();
+route(); syncHL();
 })();
 </script>
 <script>
