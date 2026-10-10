@@ -186,6 +186,28 @@ mark.hl{color:inherit;background:linear-gradient(transparent 38%, var(--hlc) 38%
 .pill.hlp{background:var(--hl0);color:#222;border-color:transparent}
 mark.hl.c0{--hlc:var(--hl0)} mark.hl.c1{--hlc:var(--hl1)} mark.hl.c2{--hlc:var(--hl2)}
 @media print{.hlbar{display:none}}
+/* reference preview: read the referred article without leaving the page */
+.peek-scrim{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.25)}
+.peek{position:fixed;z-index:41;background:var(--paper);display:flex;flex-direction:column;box-shadow:0 0 34px rgba(0,0,0,.25);
+  top:0;right:0;bottom:0;width:min(600px,92vw);border-left:4px solid hsl(var(--h,150) var(--chS) var(--chM))}
+.peek[hidden],.peek-scrim[hidden],.backchip[hidden]{display:none}
+.peek-h{display:flex;align-items:flex-start;gap:8px;padding:12px 14px 10px;border-bottom:1px solid var(--rule)}
+.peek-h .tt{flex:1;min-width:0}
+.peek-h .kk{font-size:.72em;color:var(--sub)}
+.peek-h h3{margin:2px 0 0;font-family:var(--f-law);font-size:1.15em;line-height:1.4}
+.peek-h h3 small{font-weight:400;color:var(--sub);margin-left:.4em;font-size:.82em}
+.peek-x{border:0;background:none;font-size:1.4em;line-height:1;color:var(--sub);cursor:pointer;padding:2px 6px}
+.peek-tools{display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid var(--rule)}
+.peek-tools .open{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.peek-b{overflow-y:auto;padding:12px 16px 24px;flex:1;-webkit-overflow-scrolling:touch}
+.peek-b .law p.hit-kou{background:var(--c-deb-s);box-shadow:-6px 0 0 var(--c-deb-s),6px 0 0 var(--c-deb-s);border-radius:2px}
+.peek-note{font-size:.76em;color:var(--sub);margin:0 0 8px;line-height:1.6}
+@media (max-width:900px){
+  .peek{top:auto;left:0;right:0;width:auto;max-height:78vh;border-left:0;border-top:4px solid hsl(var(--h,150) var(--chS) var(--chM));border-radius:14px 14px 0 0;padding-bottom:env(safe-area-inset-bottom)}
+}
+.backchip{position:fixed;z-index:35;left:16px;bottom:calc(16px + env(safe-area-inset-bottom));border:1px solid var(--ink);background:var(--ink);color:var(--paper);
+  border-radius:999px;padding:9px 16px 9px 12px;font-size:.86em;box-shadow:0 4px 14px rgba(0,0,0,.2);cursor:pointer;display:flex;align-items:center;gap:8px}
+.backchip .x{opacity:.7;margin-left:6px;padding:0 2px}
 .legend span{margin-right:10px}
 
 .read{display:flex;flex-direction:column;gap:18px}
@@ -299,6 +321,9 @@ mark{background:var(--mk-num);color:inherit}
     </div>
   </aside>
   <div class="scrim" id="scrim"></div>
+  <div class="peek-scrim" id="peekscrim" hidden></div>
+  <section class="peek" id="peek" role="dialog" aria-modal="true" aria-labelledby="peek-t" hidden></section>
+  <button class="backchip" id="backchip" hidden></button>
   <main class="main" id="main">
     <div class="top"><div class="top-in">
       <button class="btn menu-btn" id="menu">一覧</button>
@@ -379,7 +404,7 @@ let MARKS = {n:false, s:false, x:false};
 let CUR = null, SCOPE = 'honsoku';
 
 function findRefs(t, scope){
-  const self = CUR, out = [];
+  const self = PEEKSELF || CUR, out = [];
   const rx = /(附則)?第(\d+)条((?:の\d+)*)/g; let m;
   while ((m = rx.exec(t))){
     const before = t.slice(Math.max(0, m.index-40), m.index);
@@ -393,7 +418,8 @@ function findRefs(t, scope){
     const cand = subs.length ? [pref + [n, ...subs].join('-')] : [pref + n, pref + n + '-old'];
     const target = cand.find(k => E[k]);
     if (!target || target === self) continue;
-    out.push({s:m.index, e:m.index+m[0].length, kind:'ref', target});
+    const km = t.slice(m.index + m[0].length).match(/^第(\d+)項/);
+    out.push({s:m.index, e:m.index+m[0].length, kind:'ref', target, kou: km ? +km[1] : 0});
   }
   return out;
 }
@@ -411,7 +437,7 @@ function inline(t, scope, withMarks){
     if (sp.s < pos) continue;
     h += esc(t.slice(pos, sp.s));
     const inner = esc(t.slice(sp.s, sp.e));
-    if (sp.kind === 'ref') h += `<a class="ref" href="#${sp.target}" title="${scope === 'kaisei' ? '現行の本則' + esc(E[sp.target].label) + 'へ移動（この附則が定められた当時の条文とは異なる場合があります）' : esc(E[sp.target].label) + 'へ移動'}">${inner}</a>`;
+    if (sp.kind === 'ref') h += `<a class="ref" href="#${sp.target}" data-ref="${sp.target}" data-kou="${sp.kou}" data-from="${scope}" title="${scope === 'kaisei' ? '現行の本則' + esc(E[sp.target].label) + 'へ移動（この附則が定められた当時の条文とは異なる場合があります）' : esc(E[sp.target].label) + 'へ移動'}">${inner}</a>`;
     else h += `<span class="${sp.kind}">${inner}</span>`;
     pos = sp.e;
   }
@@ -572,6 +598,53 @@ function endDrag(ev, cancel){
 document.addEventListener('pointerup', ev => endDrag(ev, false));
 document.addEventListener('pointercancel', ev => endDrag(ev, true));
 
+/* ---------- reference preview ---------- */
+let PEEK = [], PEEKSELF = null;               // stack of {key, kou, from}
+let RET = null;              // {key, y} : where 「この条文を開く」 came from
+function kouIndex(law, n){
+  // 第1項 = the first paragraph after the article-number line; 第n項 = the paragraph starting with the circled number
+  const ps = [...law.querySelectorAll('p')];
+  if (n === 1){
+    const i = ps.findIndex(p => /第\d+条/.test(p.textContent.slice(0, 24)) && !p.classList.contains('cap-l')); if (i < 0) return null;
+    const rest = ps[i].textContent.replace(/^[（(][^）)]*[）)]/, '').replace(/^\s*第\d+条(の\d+)*/, '').trim();
+    return rest.length < 4 && ps[i + 1] ? ps[i + 1] : ps[i];
+  }
+  return ps.find(p => p.textContent.trim().startsWith(CIRC[n - 1])) || null;
+}
+function renderPeek(){
+  const box = $('#peek'), top = PEEK[PEEK.length - 1];
+  if (!top){ box.hidden = true; $('#peekscrim').hidden = true; return; }
+  const e = E[top.key], c = e.ch !== undefined ? CH[e.ch] : null, prev = PEEK[PEEK.length - 2];
+  box.style.setProperty('--h', c ? c.h : 150);
+  const yrs = kako(e).years.length;
+  box.innerHTML = `<div class="peek-h"><div class="tt"><div class="kk">参照　${SCOPE_NAME[e.scope]}${c ? '　' + esc(c.no) + '　' + esc(c.name) : ''}${yrs ? `　<span class="pill ex">過${yrs}</span>` : ''}</div>
+      <h3 id="peek-t">${esc(e.label)}${top.kou ? `第${top.kou}項` : ''}${e.caption ? `<small>（${esc(e.caption)}）</small>` : ''}</h3></div>
+      <button class="peek-x" id="peek-x" aria-label="閉じる" title="閉じる（Esc）">×</button></div>
+    <div class="peek-tools">${prev ? `<button class="btn" id="peek-back">‹ ${esc(E[prev.key].label)}に戻る</button>` : ''}
+      <button class="btn open" id="peek-open">この条文を開く</button><button class="btn" id="peek-close">閉じて元の条文へ</button></div>
+    <div class="peek-b">${top.from === 'kaisei' ? '<p class="peek-note">現行の本則の条文です。改正法附則が定められた当時の条文とは異なる場合があります。</p>' : ''}${e.status === '削除' ? '<p class="peek-note">削除された条文です。</p>' : ''}
+      <div class="law">${(PEEKSELF = top.key, lawHtml(e))}</div></div>`;
+  PEEKSELF = null;
+  box.hidden = false; $('#peekscrim').hidden = false;
+  const law = box.querySelector('.law'), hit = top.kou ? kouIndex(law, top.kou) : null;
+  box.querySelector('.peek-b').scrollTop = 0;
+  if (hit){ hit.classList.add('hit-kou'); requestAnimationFrame(() => hit.scrollIntoView({block:'center'})); }
+  $('#peek-x').onclick = $('#peek-close').onclick = closePeek;
+  if (prev) $('#peek-back').onclick = () => { PEEK.pop(); renderPeek(); };
+  $('#peek-open').onclick = () => {
+    if (CUR && CUR !== top.key) RET = {key: CUR, y: $('#main').scrollTop};
+    PEEK = []; renderPeek(); slide(top.key, 1);
+  };
+  $('#peek-x').focus({preventScroll:true});
+}
+function openPeek(key, kou, from){ PEEK.push({key, kou, from}); renderPeek(); }
+function closePeek(){ PEEK = []; renderPeek(); }
+function syncBack(){
+  const b = $('#backchip');
+  if (!RET || !E[RET.key] || CUR === RET.key || !CUR){ b.hidden = true; if (CUR === RET?.key) RET = null; return; }
+  b.innerHTML = `<span>‹ ${esc(E[RET.key].label)}に戻る</span><span class="x" data-x="1" title="閉じる">×</span>`; b.hidden = false;
+}
+
 /* ---------- sidebar ---------- */
 function marksFor(k, withExam){
   const r = rec(k), e = E[k]; let s = '';
@@ -705,7 +778,7 @@ function article(k){
   </div>
   <nav class="pn">${prev ? `<button data-slide="${prev.key}" data-dir="-1"><small>前の条文</small>${esc(prev.label)}</button>` : '<span></span>'}${next ? `<button data-slide="${next.key}" data-dir="1"><small>次の条文</small>${esc(next.label)}</button>` : '<span></span>'}</nav>`;
   $('#main').scrollTop = 0;
-  paintHL(); syncHL();
+  paintHL(); syncHL(); syncBack();
   const ta = $('#memo'); let tm = null;
   ta.addEventListener('input', () => { clearTimeout(tm); tm = setTimeout(() => { setRec(k, {memo: ta.value}); $('#saved').textContent = storeOk ? '保存しました' : '保存できませんでした'; renderList(); }, 500); });
   closeSide();
@@ -812,6 +885,7 @@ function about(){
     <h3>ツールでの表示調整（2026年10月10日）</h3>
     <p>1．第38条の4第5項：Excelでは文の途中で行が分かれているため、改行を入れずにつないでいます。そのほかの続きの行は、項・号の区切りとして改行してつないでいます。</p>
     <p>2．条文中の「第○条」は、労働基準法の条文に限ってリンクにしています。他の法律の条番号と、改正法附則の中の条番号（改正法自体の条）はリンクにしていません。改正法附則の中では、「改正後の労働基準法第○条」「新労働基準法第○条」など改正後の労働基準法を指す箇所だけを現行の本則へのリンクにしています（改正当時の条文と内容が異なる場合があります）。「改正前の」「旧労働基準法」の箇所はリンクにしていません。</p>
+    <p>リンクを押すと、参照先の条文を画面の上に重ねて表示します（「第○条第○項」の場合は、その項に色を付けます）。「この条文を開く」で移動した場合は、左下の「○○条に戻る」で元の条文の同じ位置へ戻れます。「前条」「前項」「同条」などの表現はリンクにしていません。</p>
     <p>3．「数字・期間」「主体」「要件・例外」の印は、語句の機械的な検出によるものです。既定では表示していません。</p>
     <h3>学習記録</h3>
     <p>学習済み・要復習・メモ・マーカーの線は、このファイルを開いているブラウザに保存されます。ブラウザのデータを消去すると失われるため、必要に応じて「学習記録」画面から書き出してください。</p>
@@ -854,13 +928,14 @@ function route(){
   home();
 }
 function go(t){ if (location.hash === '#' + t) route(); else location.hash = t; }
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => { closePeek(); route(); syncBack(); });
 const narrow = () => window.matchMedia('(max-width:900px)').matches;
 function closeSide(){ $('#side').classList.remove('open'); }
 function setCollapsed(b){ $('.app').classList.toggle('collapsed', b); UI.collapsed = b; saveUI(); }
 $('#menu').addEventListener('click', () => { if (narrow()) $('#side').classList.toggle('open'); else setCollapsed(!$('.app').classList.contains('collapsed')); });
 $('#sideclose').addEventListener('click', ev => { ev.stopPropagation(); if (narrow()) closeSide(); else setCollapsed(true); });
 $('#scrim').addEventListener('click', closeSide);
+$('#peekscrim').addEventListener('click', closePeek);
 if (UI.collapsed) $('.app').classList.add('collapsed');
 // swipe the list to the left to put it away (phone)
 let sx = null, sy = null;
@@ -874,6 +949,11 @@ document.addEventListener('click', ev => {
   if (chh){ const i = chh.dataset.ch; UI.open = UI.open || {}; const open = chh.getAttribute('aria-expanded') === 'true';
     if (open) { delete UI.open[i]; saveUI(); if (CUR && String(E[CUR].ch) === i) { CUR = null; } renderList(); return; }
     UI.open[i] = true; saveUI(); return go('ch' + i); }
+  const rf = ev.target.closest('a.ref[data-ref]');
+  if (rf){ ev.preventDefault(); openPeek(rf.dataset.ref, +rf.dataset.kou || 0, rf.dataset.from); return; }
+  const bc = ev.target.closest('#backchip');
+  if (bc){ if (ev.target.closest('[data-x]')) { RET = null; syncBack(); return; }
+    const r = RET; RET = null; slide(r.key, -1); setTimeout(() => { if (CUR === r.key) $('#main').scrollTop = r.y; }, 420); syncBack(); return; }
   const hb = ev.target.closest('[data-hl]'); if (hb){ HLMODE = HLMODE === hb.dataset.hl ? '' : hb.dataset.hl; HLCLR = 0; syncHL(); return; }
   const hc = ev.target.closest('[data-hlc]'); if (hc){ HLCOL = +hc.dataset.hlc; try{ localStorage.setItem('lsa-hlcol', HLCOL); }catch(e){} syncHL(); return; }
   const hx = ev.target.closest('[data-hlclear]');
@@ -904,6 +984,7 @@ try { applyTheme(localStorage.getItem('lsa-theme') || 'light'); } catch(e) { app
 thm.addEventListener('click', () => { const nx = {light:'dark', dark:'auto', auto:'light'}[thm.dataset.t]; applyTheme(nx); try{ localStorage.setItem('lsa-theme', nx); }catch(e){} });
 fsz.addEventListener('click', () => { const b = !document.documentElement.classList.contains('big'); applyFs(b); try{ localStorage.setItem('lsa-big', JSON.stringify(b)); }catch(e){} });
 document.addEventListener('keydown', ev => {
+  if (PEEK.length){ if (ev.key === 'Escape') closePeek(); return; }
   if (!CUR || /input|textarea/i.test(document.activeElement.tagName)) return;
   const nb = neighbours(CUR);
   if (ev.key === 'ArrowRight' && nb.next) slide(nb.next.key, 1);
