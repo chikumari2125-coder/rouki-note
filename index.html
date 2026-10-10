@@ -66,7 +66,15 @@ button,input,textarea,select{font:inherit;color:inherit}
 .app{display:grid;grid-template-columns:330px minmax(0,1fr);height:100vh}
 /* sidebar */
 .side{border-right:1px solid var(--rule);background:var(--paper);display:flex;flex-direction:column;min-height:0}
-.brand{padding:14px 16px 10px;border-bottom:1px solid var(--rule);cursor:pointer}
+.brandrow{display:flex;align-items:stretch;border-bottom:1px solid var(--rule)}
+.brand{padding:14px 8px 10px 16px;cursor:pointer;flex:1;min-width:0}
+.sideclose{flex:none;width:48px;border:0;border-left:1px solid var(--rule);background:none;color:var(--sub);font-size:1em;cursor:pointer}
+.sideclose:hover{background:var(--panel);color:var(--ink)}
+.filters .fnow{color:var(--c-done);font-weight:700}
+.scrim{display:none}
+.app.collapsed{grid-template-columns:0 minmax(0,1fr)}
+.app.collapsed .side{visibility:hidden;overflow:hidden;border:0}
+.app.collapsed .menu-btn{display:inline-block}
 .brand b{display:block;font-family:var(--f-law);font-size:1.05em;line-height:1.4}
 .brand span{font-size:.72em;color:var(--sub)}
 .scopes{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:10px 12px 0}
@@ -260,6 +268,10 @@ mark{background:var(--mk-num);color:inherit}
   .app{grid-template-columns:1fr}
   .side{position:fixed;inset:0 auto 0 0;width:min(350px,88vw);z-index:30;transform:translateX(-102%);transition:transform .2s;box-shadow:0 0 30px rgba(0,0,0,.2)}
   .side.open{transform:none}
+  .app.collapsed{grid-template-columns:1fr}
+  .app.collapsed .side{visibility:visible}
+  .scrim{display:block;position:fixed;inset:0;z-index:29;background:rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:opacity .2s}
+  .side.open+.scrim{opacity:1;pointer-events:auto}
   .menu-btn{display:inline-block}
   .page{padding:14px 16px 70px}
   .top-in{padding:8px 16px}
@@ -272,19 +284,21 @@ mark{background:var(--mk-num);color:inherit}
 <body>
 <div class="app">
   <aside class="side" id="side">
-    <div class="brand" data-go="home"><b>労働基準法 条文立法史ノート</b><span>条文原文・背景・議論・通達・過去問を1条ずつ</span></div>
+    <div class="brandrow"><div class="brand" data-go="home"><b>労働基準法 条文立法史ノート</b><span>条文原文・背景・議論・通達・過去問を1条ずつ</span></div>
+      <button class="sideclose" id="sideclose" title="一覧を閉じる" aria-label="一覧を閉じる">◀</button></div>
     <div class="scopes" role="group" aria-label="範囲">
       <button data-scope="honsoku">本則</button><button data-scope="fusoku">本法附則</button>
       <button data-scope="kaisei">改正法附則</button><button data-scope="src">出典資料</button>
     </div>
     <form class="sform" id="sform"><input id="q" type="search" placeholder="条番号・語句で検索" aria-label="検索語"><button class="btn" type="submit">検索</button></form>
-    <div class="filters"><label><input type="checkbox" id="f-rev"> 要復習だけ</label><label><input type="checkbox" id="f-memo"> メモありだけ</label><label><input type="checkbox" id="f-ex"> 過去問ありだけ</label></div>
+    <div class="filters"><label><input type="checkbox" id="f-rev"> 要復習だけ</label><label><input type="checkbox" id="f-memo"> メモありだけ</label><label><input type="checkbox" id="f-ex"> 過去問ありだけ</label><label class="fnow"><input type="checkbox" id="f-now"> 現行条文だけ</label></div>
     <nav class="list" id="list"></nav>
     <div class="sidefoot">
       <button class="btn" data-go="records">学習記録</button>
       <button class="btn" data-go="about">色の意味・このツールについて</button>
     </div>
   </aside>
+  <div class="scrim" id="scrim"></div>
   <main class="main" id="main">
     <div class="top"><div class="top-in">
       <button class="btn menu-btn" id="menu">一覧</button>
@@ -569,11 +583,27 @@ function marksFor(k, withExam){
   if (HL[k] && HL[k].length) s += '<span class="pill hlp">線</span>';
   return `<span class="marksq">${s}</span>`;
 }
+// 現行条文：本則は「削除」以外、本法附則は【現行掲載条文】のもの、改正法附則はe-Gov掲載のため全件
+function isCurrent(k){
+  const e = E[k];
+  if (e.status === '削除') return false;
+  if (e.scope === 'fusoku' && e.status && tagClass(e.status) === 'gone') return false;
+  return true;
+}
+// neighbours for 前へ／次へ・← →・swipe; with 「現行条文だけ」 on, deleted / historical articles are skipped
+function neighbours(k){
+  const o = ORDER[E[k].scope], i = o.indexOf(k), ok = x => !UI.now || isCurrent(x);
+  let p = null, n = null;
+  for (let j = i - 1; j >= 0; j--) if (ok(o[j])) { p = o[j]; break; }
+  for (let j = i + 1; j < o.length; j++) if (ok(o[j])) { n = o[j]; break; }
+  return {prev: p ? E[p] : null, next: n ? E[n] : null};
+}
 function passes(k){
   const r = rec(k);
   if ($('#f-rev').checked && r.st !== 'review') return false;
   if ($('#f-memo').checked && !r.memo) return false;
   if ($('#f-ex').checked && !kako(E[k]).years.length) return false;
+  if ($('#f-now').checked && !isCurrent(k)) return false;
   return true;
 }
 function itemHtml(k, dotH){
@@ -620,7 +650,7 @@ function article(k){
   CUR = k; SCOPE = e.scope; renderList();
   const sh = SH[e.sheet], r = rec(k), cols = sh.cols, c = e.ch !== undefined ? CH[e.ch] : null;
   crumb(`${SCOPE_NAME[e.scope]}${c ? ` ／ <a class="chband chbg chc" ${hv(c.h)} href="#ch${e.ch}">${esc(c.no)}　${esc(c.name)}</a>` : ''}<span>${esc(sh.head || e.sheet)}</span>`);
-  const order = ORDER[e.scope], i = order.indexOf(k), prev = E[order[i-1]], next = E[order[i+1]];
+  const {prev, next} = neighbours(k);
   const srcIdx = sourcesFor[k] || [];
   const notice = '';
   const sheetNotes = [...sh.notes_top.filter(Boolean), ...sh.notes];
@@ -776,6 +806,7 @@ function about(){
     <p>章の区分は、労働基準法の章立て（第1章～第13章、第6章の2を含む）によります（厚生労働省 法令等データベース掲載の労働基準法、2026年10月10日確認）。削除条文は、元の条番号の章に置いています。</p>
     <h3>表示上の約束</h3>
     <p>「—」「未確認」「未照合」は、確認済みの資料に記載がないこと、または確認範囲の限界を示します。未出題・議論なしの断定ではありません。</p>
+    <p>一覧の「現行条文だけ」は、本則では「削除」の条文（旧条文を含む）を、本法附則では【1947年制定時の歴史条文・現行掲載範囲外】【旧規定・2023年4月から猶予廃止】の条文を一覧から外します。改正法附則はe-Gov掲載の附則のため、すべて表示します。オンのときは、前へ・次へボタン、← →キー、スワイプでの移動も、外した条文を飛ばします。判定はExcelの条文欄の記載（「削除」・【】の区分）によります。</p>
     <p>附則・改正法附則の議論欄で「条文から読む論点」とあるものは、実際の国会質疑とは別の、学習上の問いです（Excelの記載のとおり）。</p>
     <p>${esc(kaiseiNote)}</p>
     <h3>ツールでの表示調整（2026年10月10日）</h3>
@@ -824,8 +855,18 @@ function route(){
 }
 function go(t){ if (location.hash === '#' + t) route(); else location.hash = t; }
 window.addEventListener('hashchange', route);
+const narrow = () => window.matchMedia('(max-width:900px)').matches;
 function closeSide(){ $('#side').classList.remove('open'); }
-$('#menu').addEventListener('click', () => $('#side').classList.toggle('open'));
+function setCollapsed(b){ $('.app').classList.toggle('collapsed', b); UI.collapsed = b; saveUI(); }
+$('#menu').addEventListener('click', () => { if (narrow()) $('#side').classList.toggle('open'); else setCollapsed(!$('.app').classList.contains('collapsed')); });
+$('#sideclose').addEventListener('click', ev => { ev.stopPropagation(); if (narrow()) closeSide(); else setCollapsed(true); });
+$('#scrim').addEventListener('click', closeSide);
+if (UI.collapsed) $('.app').classList.add('collapsed');
+// swipe the list to the left to put it away (phone)
+let sx = null, sy = null;
+$('#side').addEventListener('touchstart', ev => { sx = ev.touches[0].clientX; sy = ev.touches[0].clientY; }, {passive:true});
+$('#side').addEventListener('touchend', ev => { if (sx === null) return; const dx = ev.changedTouches[0].clientX - sx, dy = ev.changedTouches[0].clientY - sy; sx = null;
+  if (dx < -70 && Math.abs(dy) < Math.abs(dx) * 0.6) closeSide(); }, {passive:true});
 document.addEventListener('click', ev => {
   const a = ev.target.closest('a[href^="#s-"],a[href^="#memo-"]');
   if (a){ ev.preventDefault(); const el = document.getElementById(a.getAttribute('href').slice(1)); if (el){ if (el.tagName === 'DETAILS') el.open = true; el.scrollIntoView({behavior:'smooth', block:'start'}); } return; }
@@ -851,6 +892,9 @@ document.addEventListener('click', ev => {
 });
 $('#sform').addEventListener('submit', ev => { ev.preventDefault(); const v = $('#q').value.trim(); if (v) go('q=' + v); });
 ['#f-rev','#f-memo','#f-ex'].forEach(id => $(id).addEventListener('change', renderList));
+$('#f-now').checked = !!UI.now;
+$('#f-now').addEventListener('change', () => { UI.now = $('#f-now').checked; saveUI();
+  if (CUR) { const y = $('#main').scrollTop, open = $('#side').classList.contains('open'); article(CUR); $('#main').scrollTop = y; if (open) $('#side').classList.add('open'); } else renderList(); });
 const fsz = $('#fsz');
 function applyFs(b){ document.documentElement.classList.toggle('big', b); fsz.setAttribute('aria-pressed', b); }
 try { applyFs(JSON.parse(localStorage.getItem('lsa-big') || 'false')); MARKS = Object.assign(MARKS, JSON.parse(localStorage.getItem('lsa-marks') || '{}')); } catch(e) {}
@@ -861,9 +905,9 @@ thm.addEventListener('click', () => { const nx = {light:'dark', dark:'auto', aut
 fsz.addEventListener('click', () => { const b = !document.documentElement.classList.contains('big'); applyFs(b); try{ localStorage.setItem('lsa-big', JSON.stringify(b)); }catch(e){} });
 document.addEventListener('keydown', ev => {
   if (!CUR || /input|textarea/i.test(document.activeElement.tagName)) return;
-  const o = ORDER[E[CUR].scope], i = o.indexOf(CUR);
-  if (ev.key === 'ArrowRight' && o[i+1]) slide(o[i+1], 1);
-  if (ev.key === 'ArrowLeft' && o[i-1]) slide(o[i-1], -1);
+  const nb = neighbours(CUR);
+  if (ev.key === 'ArrowRight' && nb.next) slide(nb.next.key, 1);
+  if (ev.key === 'ArrowLeft' && nb.prev) slide(nb.prev.key, -1);
 });
 /* slide to the neighbouring article: the page moves out to one side and the next one comes in from the other */
 let sliding = false;
@@ -887,9 +931,9 @@ $('#page').addEventListener('touchend', ev => {
   if (tx === null || !CUR) return;
   const dx = ev.changedTouches[0].clientX - tx, dy = ev.changedTouches[0].clientY - ty; tx = null;
   if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6) return;
-  const o = ORDER[E[CUR].scope], i = o.indexOf(CUR);
-  if (dx < 0 && o[i+1]) slide(o[i+1], 1);
-  if (dx > 0 && o[i-1]) slide(o[i-1], -1);
+  const nb = neighbours(CUR);
+  if (dx < 0 && nb.next) slide(nb.next.key, 1);
+  if (dx > 0 && nb.prev) slide(nb.prev.key, -1);
 }, {passive:true});
 route();
 })();
